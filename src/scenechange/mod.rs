@@ -56,14 +56,12 @@ impl<T: Pixel> SceneChangeDetector<T> {
     // conversion, but the deltas needed to be scaled down. The deltas for keyframes
     // in YUV were about 1/3 to 1/2 of what they were in HSV, but non-keyframes were
     // very unlikely to have a delta greater than 3 in YUV, whereas they may reach into
-    // the double digits in HSV. Therefore, 12 was chosen as a reasonable default threshold.
-    // This may be adjusted later.
+    // the double digits in HSV.
     //
     // This threshold is only used for the fast scenecut implementation.
     //
-    // Testing shown that default threshold of 12 overallocates keyframes by almost double,
-    // compared to other scene change implementations
-    const BASE_THRESHOLD: usize = 12;
+    // Experiments have shown that this threshold is optimal.
+    const BASE_THRESHOLD: usize = 18;
     let bit_depth = encoder_config.bit_depth;
     let fast_mode = encoder_config.speed_settings.fast_scene_detection
       || encoder_config.low_latency;
@@ -239,6 +237,13 @@ impl<T: Pixel> SceneChangeDetector<T> {
     let mut cloned_deque = self.score_deque.to_vec();
     cloned_deque.remove(self.deque_offset);
 
+    // Subtract the previous metric value from the current one
+    // It makes the peaks in the metric more distinctive
+    if !self.fast_mode && self.deque_offset > 0 {
+      let previous_scene_score = self.score_deque[self.deque_offset - 1].0;
+      self.score_deque[self.deque_offset].0 -= previous_scene_score;
+    }
+
     let scene_score = self.score_deque[self.deque_offset].0;
     let scene_threshold = self.score_deque[self.deque_offset].1;
 
@@ -330,7 +335,7 @@ impl<T: Pixel> SceneChangeDetector<T> {
           / intra_costs.len() as f64
       },
       move || {
-        let inter_costs = estimate_inter_costs(
+        let inter_costs = estimate_inter_costs_histogram(
           frame2_ref2,
           frame1,
           self.bit_depth,
@@ -352,7 +357,7 @@ impl<T: Pixel> SceneChangeDetector<T> {
     // `0.4` was chosen based on trials of the `scenecut-720p` set in AWCY,
     // as it appeared to provide the best average compression.
     // This also matches the default scenecut threshold in x264.
-    const THRESH_MAX: f64 = 0.4;
+    const THRESH_MAX: f64 = 0.1818;
     const THRESH_MIN: f64 = THRESH_MAX * 0.25;
     let distance_from_keyframe = frameno - previous_keyframe;
     let min_keyint = self.encoder_config.min_key_frame_interval;

@@ -16,6 +16,12 @@ use crate::transform::TxSize;
 use crate::{Frame, Pixel};
 use rust_hawktracer::*;
 use std::sync::Arc;
+use histogram::Histogram;
+use v_frame::pixel::CastFromPrimitive;
+use std::fs::File;
+use std::io::{self, BufReader, Read};
+use std::io::prelude::*;
+use std::fs::OpenOptions;
 
 pub(crate) const IMP_BLOCK_MV_UNITS_PER_PIXEL: i64 = 8;
 pub(crate) const IMP_BLOCK_SIZE_IN_MV_UNITS: i64 =
@@ -113,6 +119,65 @@ pub(crate) fn estimate_intra_costs<T: Pixel>(
   }
 
   intra_costs.into_boxed_slice()
+}
+
+
+#[hawktracer(estimate_inter_costs_histogram)]
+pub(crate) fn estimate_inter_costs_histogram<T: Pixel>(
+  frame: Arc<Frame<T>>, ref_frame: Arc<Frame<T>>, bit_depth: usize,
+  mut config: EncoderConfig, sequence: Arc<Sequence>,
+) -> Box<[u32]> {
+
+  let mut histogram = Histogram::configure()
+    .max_value(256)
+    .build()
+    .unwrap();
+  let plane = &frame.planes[0];
+  let pixels = plane.iter();
+  for p in pixels {
+      let cur = i16::cast_from(p);
+      histogram.increment(cur as u64);
+  }
+
+  let mut ref_histogram = Histogram::configure()
+    .max_value(256)
+    .build()
+    .unwrap();
+  let ref_plane = &ref_frame.planes[0];
+  let ref_pixels = ref_plane.iter();
+  for p in ref_pixels {
+      let ref_cur = i16::cast_from(p);
+      ref_histogram.increment(ref_cur as u64);
+  }
+
+
+  let mut s1 = 0 as i32;
+  let mut s2 = 0 as i32;
+  for i in 0..256 {
+    let diff = (histogram.get(i).unwrap() as i32) - (ref_histogram.get(i).unwrap() as i32);
+    s1 += diff.abs();
+    s2 += diff * diff;
+  }
+
+  let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open("hist.txt")
+        .unwrap();
+
+
+  if s1 != 0 {
+    writeln!(file, "{} {} {} {}", 
+      (histogram.mean().unwrap() as i32  - ref_histogram.mean().unwrap() as i32).abs(), 
+      (histogram.stddev().unwrap() as i32 - ref_histogram.stddev().unwrap() as i32).abs(),
+      s1,
+      s2,
+    );
+  } else {
+    writeln!(file, "{}", s1);   
+  }
+
+  return Box::new([s1 as u32, s1 as u32]);
 }
 
 #[hawktracer(estimate_inter_costs)]
