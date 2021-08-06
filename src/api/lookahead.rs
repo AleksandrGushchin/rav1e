@@ -174,7 +174,10 @@ pub(crate) fn estimate_inter_costs_histogram<T: Pixel>(
       s2,
     );
   } else {
-    writeln!(file, "{}", s1);   
+    writeln!(file, "0 0 {} {}",
+      s1,
+      s2,
+    ); 
   }
 
   return Box::new([s1 as u32, s1 as u32]);
